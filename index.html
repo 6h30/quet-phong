@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f3a5f">
+<title>Quét Phòng – Mặt bằng & 3D</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<style>
+  :root { --ink:#1b2430; --navy:#1f3a5f; --accent:#e8792b; --line:#d9dee5; --bg:#f3f5f8; --card:#fff; --muted:#667085; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { font: 15px/1.45 system-ui, "Segoe UI", Roboto, sans-serif; color: var(--ink); background: var(--bg); display: flex; flex-direction: column; }
+  header { background: var(--navy); color: #fff; display: flex; align-items: center; gap: 12px; padding: 8px 14px; flex-wrap: wrap; }
+  header h1 { font-size: 16px; margin: 0; font-weight: 650; letter-spacing: .2px; }
+  nav { display: flex; gap: 4px; margin-left: auto; }
+  nav button { background: transparent; color: #cfd9e6; border: 0; padding: 8px 14px; border-radius: 8px; font: inherit; font-weight: 600; cursor: pointer; }
+  nav button.on { background: #fff; color: var(--navy); }
+  main { flex: 1; min-height: 0; position: relative; }
+  .panel { position: absolute; inset: 0; display: none; }
+  .panel.on { display: flex; }
+  button.btn { font: inherit; padding: 8px 12px; border-radius: 8px; border: 1px solid var(--line); background: #fff; color: var(--ink); cursor: pointer; }
+  button.btn:hover { border-color: #b8c1cd; }
+  button.btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 650; }
+  button.btn:disabled { opacity: .5; cursor: not-allowed; }
+
+  /* Quét */
+  #p-scan { overflow: auto; justify-content: center; padding: 20px 16px; }
+  .scan-card { max-width: 560px; width: 100%; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 22px; align-self: flex-start; }
+  .scan-card h2 { margin: 0 0 6px; font-size: 20px; }
+  .scan-card ol { padding-left: 20px; margin: 12px 0 18px; }
+  .scan-card li { margin: 6px 0; }
+  .status { margin: 12px 0 0; padding: 10px 12px; border-radius: 8px; background: #fff6ec; border: 1px solid #f3d3b3; font-size: 14px; }
+  .status.ok { background: #ecf8f0; border-color: #b9e0c6; }
+  h3.mode { margin: 22px 0 0; font-size: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+  h3.mode span { font-size: 12px; font-weight: 500; color: var(--muted); margin-left: 6px; }
+  .scan-card label.f input { width: 90px; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; text-align: right; }
+  .scan-card label.f { margin: 0 0 12px; }
+
+  /* Chế độ ngắm góc nghiêng */
+  #tilt { display: none; position: fixed; inset: 0; z-index: 70; background: #000; }
+  #tilt.on { display: block; }
+  #tilt video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+  .cross { position: absolute; left: 50%; top: 50%; width: 64px; height: 64px; margin: -32px 0 0 -32px; pointer-events: none; }
+  .cross::before, .cross::after { content: ""; position: absolute; background: #ffcc00; box-shadow: 0 0 0 1px rgba(0,0,0,.6); }
+  .cross::before { left: 31px; top: 0; width: 2px; height: 64px; }
+  .cross::after { top: 31px; left: 0; height: 2px; width: 64px; }
+  .tilt-top { position: absolute; left: 12px; right: 12px; top: calc(12px + env(safe-area-inset-top)); display: flex; gap: 10px; align-items: flex-start; }
+  #tiltInfo { flex: 1; padding: 10px 12px; border-radius: 12px; background: rgba(0,0,0,.62); color: #fff; font-size: 15px; }
+  #tiltInfo b { font-size: 20px; }
+  #tiltMap { width: 120px; height: 120px; border-radius: 12px; background: rgba(0,0,0,.62); }
+  .tilt-bottom { position: absolute; left: 0; right: 0; bottom: 0; display: flex; gap: 8px; padding: 16px 12px calc(20px + env(safe-area-inset-bottom)); }
+  .tilt-bottom button { flex: 1; font: inherit; font-size: 15px; font-weight: 650; padding: 15px 4px; border-radius: 14px; border: 0; background: rgba(255,255,255,.92); color: #111; }
+  .tilt-bottom button.primary { flex: 1.5; background: var(--accent); color: #fff; }
+  .scan-card .btn.primary { width: 100%; padding: 14px; font-size: 16px; }
+
+  /* Mặt bằng */
+  #p-plan { flex-direction: row; }
+  .plan-wrap { flex: 1; min-width: 0; position: relative; background: #fff; }
+  #plan { width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; user-select: none; }
+  .zoom { position: absolute; right: 10px; top: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .zoom .btn { width: 38px; height: 38px; padding: 0; font-size: 18px; }
+  .hint { position: absolute; left: 10px; bottom: 10px; right: 60px; font-size: 13px; color: var(--muted); background: rgba(255,255,255,.88); padding: 6px 10px; border-radius: 8px; pointer-events: none; }
+  aside { width: 300px; background: var(--card); border-left: 1px solid var(--line); padding: 14px; overflow: auto; }
+  aside h3 { margin: 14px 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); }
+  aside h3:first-child { margin-top: 0; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .row .btn { flex: 1 1 auto; }
+  label.f { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 6px 0; }
+  label.f input { width: 90px; font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; text-align: right; }
+  .stats { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; font-variant-numeric: tabular-nums; }
+  .stats b { text-align: right; }
+  #walls { margin: 0; padding: 0; list-style: none; font-variant-numeric: tabular-nums; }
+  #walls li { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px dashed var(--line); }
+
+  /* 3D */
+  #p-3d { background: #e9edf2; }
+  #c3d { width: 100%; height: 100%; display: block; touch-action: none; }
+  .bar3d { position: absolute; left: 10px; top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: rgba(255,255,255,.9); padding: 8px 10px; border-radius: 10px; }
+  #empty3d { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; color: var(--muted); pointer-events: none; }
+
+  /* AR overlay */
+  .ar-canvas { position: fixed; inset: 0; z-index: 50; }
+  .ar-overlay { display: none; position: fixed; inset: 0; z-index: 60; flex-direction: column; justify-content: space-between; pointer-events: none; }
+  .ar-overlay.on { display: flex; }
+  .ar-top { margin: 16px; padding: 10px 14px; border-radius: 12px; background: rgba(0,0,0,.6); color: #fff; font-size: 16px; text-align: center; }
+  .ar-bottom { display: flex; gap: 10px; padding: 16px 16px calc(22px + env(safe-area-inset-bottom)); pointer-events: auto; }
+  .ar-bottom button { flex: 1; font: inherit; font-size: 16px; font-weight: 650; padding: 16px 8px; border-radius: 14px; border: 0; background: rgba(255,255,255,.92); color: #111; }
+  .ar-bottom button.primary { flex: 1.6; background: var(--accent); color: #fff; }
+
+  @media (max-width: 760px) {
+    #p-plan { flex-direction: column; }
+    aside { width: auto; border-left: 0; border-top: 1px solid var(--line); max-height: 44%; }
+    header h1 { font-size: 15px; }
+    nav { margin-left: 0; width: 100%; }
+    nav button { flex: 1; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Quét Phòng</h1>
+  <nav>
+    <button data-tab="scan">1 · Quét</button>
+    <button data-tab="plan" class="on">2 · Mặt bằng</button>
+    <button data-tab="3d">3 · Khối 3D</button>
+  </nav>
+</header>
+
+<main>
+  <section class="panel" id="p-scan">
+    <div class="scan-card">
+      <h2>Quét phòng bằng camera</h2>
+      <div>Ngắm camera vào các góc phòng, ứng dụng tự dựng mặt bằng và khối 3D.</div>
+
+      <h3 class="mode">Cách 1 · Ngắm góc nghiêng <span>iPhone Safari · Android</span></h3>
+      <ol>
+        <li>Đứng ở chỗ <b>nhìn thấy hết các góc phòng</b> (thường là giữa phòng). Đứng yên một chỗ suốt lúc quét.</li>
+        <li>Cầm điện thoại ngang tầm mắt, nhập độ cao từ sàn tới camera bên dưới.</li>
+        <li>Đưa dấu <b>+</b> vào từng <b>góc chân tường</b> (chỗ 2 tường gặp sàn), lần lượt theo một chiều, bấm <b>Thêm góc</b>.</li>
+        <li>Muốn đo trần: ngắm vào <b>góc trần ngay trên góc vừa thêm</b>, bấm <b>Đo trần</b>. Xong thì bấm <b>Xong</b>.</li>
+      </ol>
+      <label class="f">Độ cao camera so với sàn (m) <input id="inCamH" type="number" step="0.05" min="0.5" max="2.5" value="1.45"></label>
+      <button class="btn primary" id="tiltStart">Bắt đầu ngắm</button>
+      <div id="tiltStatus" class="status">Kiểm tra thiết bị…</div>
+
+      <h3 class="mode">Cách 2 · Quét AR <span>Android Chrome · chính xác hơn</span></h3>
+      <ol>
+        <li>Lia chậm điện thoại quanh sàn đến khi thấy vòng tròn ngắm.</li>
+        <li>Đi tới gần, đưa vòng ngắm vào từng góc tường sát sàn, bấm <b>Thêm góc</b>.</li>
+        <li>Về gần góc đầu tiên rồi bấm <b>Thêm góc</b> để khép phòng, hoặc bấm <b>Xong</b>.</li>
+      </ol>
+      <button class="btn primary" id="arStart" disabled>Bắt đầu quét AR</button>
+      <div id="arStatus" class="status">Đang kiểm tra thiết bị…</div>
+    </div>
+  </section>
+
+  <section class="panel on" id="p-plan">
+    <div class="plan-wrap">
+      <svg id="plan" xmlns="http://www.w3.org/2000/svg"></svg>
+      <div class="zoom">
+        <button class="btn" id="zIn" title="Phóng to">+</button>
+        <button class="btn" id="zOut" title="Thu nhỏ">−</button>
+        <button class="btn" id="zFit" title="Vừa khung">⤢</button>
+      </div>
+      <div class="hint" id="hint"></div>
+    </div>
+    <aside>
+      <h3>Số liệu</h3>
+      <div class="stats" id="stats"></div>
+      <h3>Thông số</h3>
+      <label class="f">Chiều cao trần (m) <input id="inH" type="number" step="0.05" min="1" max="10"></label>
+      <label class="f">Dày tường (m) <input id="inT" type="number" step="0.01" min="0.05" max="1"></label>
+      <h3>Chỉnh sửa</h3>
+      <div class="row">
+        <button class="btn" id="bUndo">Hoàn tác điểm</button>
+        <button class="btn" id="bOrtho">Nắn vuông góc</button>
+        <button class="btn" id="bSample">Phòng mẫu</button>
+        <button class="btn" id="bClear">Xóa hết</button>
+      </div>
+      <h3>Các cạnh tường</h3>
+      <ul id="walls"></ul>
+      <h3>Xuất file</h3>
+      <div class="row">
+        <button class="btn" id="xDXF">DXF (AutoCAD)</button>
+        <button class="btn" id="xSVG">SVG</button>
+        <button class="btn" id="xJSON">JSON</button>
+      </div>
+    </aside>
+  </section>
+
+  <section class="panel" id="p-3d">
+    <canvas id="c3d"></canvas>
+    <div class="bar3d">
+      <label><input type="checkbox" id="chkGlass"> Tường trong suốt</label>
+      <button class="btn" id="xGLB">Xuất GLB</button>
+    </div>
+    <div id="empty3d">Chưa có mặt bằng. Hãy quét hoặc vẽ ở bước 2.</div>
+  </section>
+</main>
+
+<div id="tilt">
+  <video id="tiltVideo" playsinline muted autoplay></video>
+  <div class="cross"></div>
+  <div class="tilt-top">
+    <div id="tiltInfo">Đang mở camera…</div>
+    <canvas id="tiltMap" width="240" height="240"></canvas>
+  </div>
+  <div class="tilt-bottom">
+    <button id="tiltUndo">Hoàn tác</button>
+    <button id="tiltCeil">Đo trần</button>
+    <button id="tiltAdd" class="primary">+ Thêm góc</button>
+    <button id="tiltDone">Xong</button>
+  </div>
+</div>
+
+<div class="ar-overlay" id="arOverlay">
+  <div class="ar-top" id="arInfo">Lia chậm điện thoại để tìm mặt sàn…</div>
+  <div class="ar-bottom">
+    <button id="arUndo">Hoàn tác</button>
+    <button id="arAdd" class="primary">+ Thêm góc</button>
+    <button id="arDone">Xong</button>
+  </div>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
