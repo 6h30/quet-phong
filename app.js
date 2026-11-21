@@ -488,32 +488,82 @@ function camDir(e) {
 function onOrient(e) {
   if (!tilt || e.alpha == null || e.beta == null) return;
   const d = camDir(e);
-  if (!tilt.sm) tilt.sm = d; else for (let i = 0; i < 3; i++) tilt.sm[i] = tilt.sm[i] * 0.75 + d[i] * 0.25; // làm mượt
+  if (tilt.capture) tilt.capture.push(d);
+  if (!tilt.sm) tilt.sm = d.slice(); else for (let i = 0; i < 3; i++) tilt.sm[i] = tilt.sm[i] * 0.75 + d[i] * 0.25; // làm mượt
 }
-function tiltReading() {
-  const [x, y, z] = tilt.sm, hl = Math.hypot(x, y) || 1e-6;
+// Từ một hướng nhìn: góc ngẩng/chúc, hướng ngang trên mặt bằng, và điểm chạm sàn (nếu chúc xuống)
+function readingFrom(v) {
+  const [x, y, z] = v, hl = Math.hypot(x, y) || 1e-6, st = tilt.station;
   const elev = Math.atan2(z, hl); // âm = chúc xuống
+  const dir = { x: x / hl, y: -y / hl }; // mặt bằng: x sang phải, y xuống dưới
   let floor = null;
   if (elev < -4 * DEG) {
     const d = tilt.h / Math.tan(-elev);
-    if (d < 25) floor = { x: x / hl * d, y: -y / hl * d, d };
+    if (d < 25) floor = { x: st.x + dir.x * d, y: st.y + dir.y * d, d };
   }
-  return { elev, floor };
+  return { elev, dir, floor };
+}
+const median = (a) => { const s = [...a].sort((p, q) => p - q), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
+// Khoảng cách ngang từ chỗ đứng tới bức tường (đã đo) theo hướng đang nhìn
+function wallDistance(r) {
+  const p = tilt.pts, n = p.length, st = tilt.station;
+  let best = null;
+  for (let i = 0; i < (n >= 3 ? n : n - 1); i++) {
+    const a = p[i], b = p[(i + 1) % n], ex = b.x - a.x, ey = b.y - a.y;
+    const den = r.dir.x * ey - r.dir.y * ex;
+    if (Math.abs(den) < 1e-9) continue;
+    const wx = a.x - st.x, wy = a.y - st.y;
+    const t = (wx * ey - wy * ex) / den, u = (wx * r.dir.y - wy * r.dir.x) / den;
+    if (t > 0.2 && u > -0.05 && u < 1.05 && (best == null || t < best)) best = t;
+  }
+  if (best == null) { // chưa có tường theo hướng này: dùng góc đã đo gần hướng nhìn nhất (lệch < 15°)
+    let bd = 15 * DEG;
+    for (const q of p) {
+      const vx = q.x - st.x, vy = q.y - st.y, L = Math.hypot(vx, vy);
+      if (L < 0.2) continue;
+      const ang = Math.acos(Math.max(-1, Math.min(1, (vx * r.dir.x + vy * r.dir.y) / L)));
+      if (ang < bd) { bd = ang; best = L; }
+    }
+  }
+  return best;
+}
+// Lấy trung bình hướng nhìn trong 0,45 s để số đo không bị rung tay
+function steady(cb) {
+  if (!tilt?.sm || tilt.capture) return;
+  tilt.capture = [];
+  setTimeout(() => {
+    if (!tilt) return;
+    const c = tilt.capture; tilt.capture = null;
+    let v = tilt.sm.slice();
+    if (c.length >= 3) { v = [0, 0, 0]; c.forEach((d) => { for (let i = 0; i < 3; i++) v[i] += d[i]; }); }
+    cb(readingFrom(v));
+    navigator.vibrate?.(30);
+  }, 450);
 }
 function drawTiltMap(cur) {
-  const cv = $('#tiltMap'), g = cv.getContext('2d'), W = cv.width, pts = tilt.pts;
+  const cv = $('#tiltMap'), g = cv.getContext('2d'), W = cv.width, { pts, stations, station } = tilt;
   g.clearRect(0, 0, W, W);
-  const all = cur ? [...pts, cur] : pts;
-  const R = Math.max(2, ...all.map((v) => Math.hypot(v.x, v.y))) * 1.15, k = (W / 2 - 12) / R, P = (v) => [W / 2 + v.x * k, W / 2 + v.y * k];
+  const all = [...pts, ...stations, ...(cur ? [cur] : [])];
+  const b = bounds(all), s = Math.max(2, b.w, b.h) * 1.15, k = (W - 24) / s;
+  const P = (v) => [W / 2 + (v.x - b.cx) * k, W / 2 + (v.y - b.cy) * k];
   if (pts.length) {
     g.strokeStyle = '#fff'; g.lineWidth = 3; g.beginPath();
     pts.forEach((v, i) => { const [px, py] = P(v); i ? g.lineTo(px, py) : g.moveTo(px, py); });
     if (pts.length >= 3) g.closePath();
     g.stroke();
   }
-  if (cur) { g.strokeStyle = '#ffcc00'; g.setLineDash([6, 6]); g.beginPath(); g.moveTo(W / 2, W / 2); g.lineTo(...P(cur)); g.stroke(); g.setLineDash([]); }
-  pts.forEach((v, i) => { g.fillStyle = i ? '#e8792b' : '#2e9e5b'; g.beginPath(); g.arc(...P(v), 7, 0, 7); g.fill(); });
-  g.fillStyle = '#4da3ff'; g.beginPath(); g.arc(W / 2, W / 2, 8, 0, 7); g.fill(); // chỗ bạn đứng
+  if (cur) { g.strokeStyle = '#ffcc00'; g.lineWidth = 2; g.setLineDash([6, 6]); g.beginPath(); g.moveTo(...P(station)); g.lineTo(...P(cur)); g.stroke(); g.setLineDash([]); }
+  pts.forEach((v, i) => {
+    const last = i === pts.length - 1 && tilt.relocate;
+    g.fillStyle = last ? '#ffcc00' : i ? '#e8792b' : '#2e9e5b';
+    g.beginPath(); g.arc(...P(v), last ? 11 : 7, 0, 7); g.fill();
+  });
+  stations.forEach((v) => { g.fillStyle = v === station ? '#4da3ff' : 'rgba(77,163,255,.45)'; g.beginPath(); g.arc(...P(v), v === station ? 9 : 6, 0, 7); g.fill(); });
+}
+function updateTiltButtons() {
+  $('#tiltAdd').textContent = tilt?.relocate ? 'Xác nhận chỗ đứng' : '+ Thêm góc';
+  $('#tiltMove').classList.toggle('on', !!tilt?.relocate);
+  $('#tiltCeil').disabled = !!tilt?.relocate;
 }
 function tiltLoop() {
   if (!tilt) return;
@@ -523,14 +573,21 @@ function tiltLoop() {
     info.textContent = performance.now() - tilt.t0 > 2500 ? 'Không nhận được cảm biến nghiêng. Hãy cho phép “Chuyển động & hướng” rồi thử lại.' : 'Đang chờ cảm biến…';
     return;
   }
-  const r = tiltReading(), ceilTxt = tilt.ceil ? ` · trần ${tilt.ceil.toFixed(2)} m` : '';
-  if (r.floor) {
+  const r = readingFrom(tilt.sm);
+  const ceilTxt = tilt.ceils.length ? ` · trần ${median(tilt.ceils).toFixed(2)} m (${tilt.ceils.length} lần)` : '';
+  if (tilt.capture) info.innerHTML = '<b>Giữ yên máy…</b>';
+  else if (tilt.relocate) {
+    info.innerHTML = 'Đã đổi chỗ. Ngắm lại <b>góc cuối cùng</b> (chấm vàng) rồi bấm <b>Xác nhận chỗ đứng</b>'
+      + (r.floor ? `<br>cách ${r.floor.d.toFixed(2)} m` : '');
+  } else if (r.floor) {
     let t = `Chúc ${(-r.elev / DEG).toFixed(0)}° · cách <b>${r.floor.d.toFixed(2)} m</b>`;
     if (n) t += ` · cạnh ${dist(tilt.pts[n - 1], r.floor).toFixed(2)} m`;
     info.innerHTML = t + `<br>${n} góc${ceilTxt}`;
   } else if (r.elev > 4 * DEG && n) {
-    const H = tilt.h + tilt.pts[n - 1].d * Math.tan(r.elev);
-    info.innerHTML = `Ngẩng ${(r.elev / DEG).toFixed(0)}° · trần <b>${H.toFixed(2)} m</b><br>(ngắm góc trần ngay trên góc vừa thêm)`;
+    const d = wallDistance(r);
+    info.innerHTML = d == null
+      ? `Ngẩng ${(r.elev / DEG).toFixed(0)}° · hãy ngắm <b>mép trần</b> trên một bức tường đã đo${ceilTxt}`
+      : `Ngẩng ${(r.elev / DEG).toFixed(0)}° · tường cách ${d.toFixed(2)} m<br>trần <b>${(tilt.h + d * Math.tan(r.elev)).toFixed(2)} m</b> → bấm Đo trần${ceilTxt}`;
   } else {
     info.innerHTML = `Chúc camera xuống, ngắm dấu + vào góc chân tường<br>${n} góc${ceilTxt}`;
   }
@@ -550,11 +607,13 @@ async function startTilt() {
     alert('Cần cho phép truy cập “Chuyển động & hướng” để đo góc nghiêng. Tải lại trang và bấm Cho phép.');
     return;
   }
-  const video = $('#tiltVideo'); video.srcObject = cam.value;
+  const video = $('#tiltVideo'); video.srcObject = cam.value; video.style.transform = '';
   video.play().catch(() => { /* đã autoplay */ });
-  tilt = { h, stream: cam.value, pts: [], sm: null, ceil: null, t0: performance.now() };
+  const station = { x: 0, y: 0 };
+  tilt = { h, stream: cam.value, pts: [], ceils: [], hist: [], station, stations: [station], relocate: false, capture: null, zoom: false, sm: null, t0: performance.now() };
   addEventListener('deviceorientation', onOrient);
-  $('#tilt').classList.add('on');
+  $('#tilt').classList.add('on'); $('#tiltZoom').classList.remove('on');
+  updateTiltButtons();
   tiltLoop();
 }
 function stopTilt(keep) {
@@ -569,26 +628,53 @@ function stopTilt(keep) {
   alignLongest();
   const x0 = Math.min(...room.points.map((v) => v.x)), y0 = Math.min(...room.points.map((v) => v.y));
   room.points.forEach((v) => { v.x = Math.round((v.x - x0) * 100) / 100; v.y = Math.round((v.y - y0) * 100) / 100; });
-  if (t.ceil) { room.height = Math.round(t.ceil * 100) / 100; inH.value = room.height; }
+  if (t.ceils.length) { room.height = Math.round(median(t.ceils) * 100) / 100; inH.value = room.height; }
   show('plan'); fit(); commit();
 }
 $('#tiltStart').onclick = () => { if (tiltOK && isSecureContext) startTilt(); else alert(tiltStatus.textContent); };
-$('#tiltAdd').onclick = () => {
-  if (!tilt?.sm) return;
-  const r = tiltReading();
+$('#tiltAdd').onclick = () => steady((r) => {
   if (!r.floor) { alert('Hãy chúc camera xuống và ngắm vào góc chân tường trên sàn.'); return; }
-  tilt.pts.push(r.floor);
-  navigator.vibrate?.(30);
-};
+  if (tilt.relocate) { // chỗ đứng mới = góc cuối cùng − vectơ từ chỗ đứng tới góc đó
+    const ref = tilt.pts[tilt.pts.length - 1], prev = tilt.station;
+    tilt.station = { x: ref.x - (r.floor.x - prev.x), y: ref.y - (r.floor.y - prev.y) };
+    tilt.stations.push(tilt.station);
+    tilt.hist.push({ type: 'st', prev });
+    tilt.relocate = false; updateTiltButtons();
+  } else {
+    tilt.pts.push({ x: r.floor.x, y: r.floor.y });
+    tilt.hist.push({ type: 'pt' });
+  }
+});
 $('#tiltCeil').onclick = () => {
   if (!tilt?.sm) return;
-  const r = tiltReading(), n = tilt.pts.length;
-  if (!n) { alert('Thêm ít nhất một góc chân tường trước, rồi ngắm góc trần ngay phía trên nó.'); return; }
-  if (r.elev < 4 * DEG) { alert('Hãy ngẩng camera lên góc trần ngay trên góc vừa thêm.'); return; }
-  tilt.ceil = tilt.h + tilt.pts[n - 1].d * Math.tan(r.elev);
-  navigator.vibrate?.(30);
+  if (!tilt.pts.length) { alert('Đo ít nhất hai góc chân tường trước, rồi ngắm mép trần trên bức tường giữa hai góc đó.'); return; }
+  steady((r) => {
+    if (r.elev < 4 * DEG) { alert('Hãy ngẩng camera lên mép trần (chỗ tường gặp trần) trên một bức tường đã đo.'); return; }
+    const d = wallDistance(r);
+    if (d == null) { alert('Hướng này chưa có bức tường nào đã đo. Hãy ngắm mép trần phía trên đoạn tường nằm giữa hai góc đã thêm.'); return; }
+    tilt.ceils.push(tilt.h + d * Math.tan(r.elev));
+    tilt.hist.push({ type: 'ceil' });
+  });
 };
-$('#tiltUndo').onclick = () => tilt && tilt.pts.pop();
+$('#tiltMove').onclick = () => {
+  if (!tilt) return;
+  if (!tilt.pts.length) { alert('Đo ít nhất một góc trước khi đổi chỗ đứng.'); return; }
+  tilt.relocate = !tilt.relocate; updateTiltButtons();
+};
+$('#tiltZoom').onclick = () => {
+  if (!tilt) return;
+  tilt.zoom = !tilt.zoom;
+  $('#tiltVideo').style.transform = tilt.zoom ? 'scale(2)' : '';
+  $('#tiltZoom').classList.toggle('on', tilt.zoom);
+};
+$('#tiltUndo').onclick = () => {
+  if (!tilt) return;
+  if (tilt.relocate) { tilt.relocate = false; updateTiltButtons(); return; }
+  const h = tilt.hist.pop(); if (!h) return;
+  if (h.type === 'pt') tilt.pts.pop();
+  else if (h.type === 'ceil') tilt.ceils.pop();
+  else { tilt.stations.pop(); tilt.station = h.prev; }
+};
 $('#tiltDone').onclick = () => stopTilt(true);
 
 // ---------- Khởi động ----------

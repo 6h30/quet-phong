@@ -55,7 +55,12 @@
   .tilt-top { position: absolute; left: 12px; right: 12px; top: calc(12px + env(safe-area-inset-top)); display: flex; gap: 10px; align-items: flex-start; }
   #tiltInfo { flex: 1; padding: 10px 12px; border-radius: 12px; background: rgba(0,0,0,.62); color: #fff; font-size: 15px; }
   #tiltInfo b { font-size: 20px; }
+  #tilt video { transform-origin: 50% 50%; }
+  .tilt-side { display: flex; flex-direction: column; gap: 8px; width: 120px; }
   #tiltMap { width: 120px; height: 120px; border-radius: 12px; background: rgba(0,0,0,.62); }
+  .tilt-side button { font: inherit; font-size: 13px; font-weight: 650; padding: 10px 4px; border-radius: 10px; border: 0; background: rgba(255,255,255,.88); color: #111; }
+  .tilt-side button.on { background: #ffcc00; }
+  .tilt-bottom button:disabled { opacity: .45; }
   .tilt-bottom { position: absolute; left: 0; right: 0; bottom: 0; display: flex; gap: 8px; padding: 16px 12px calc(20px + env(safe-area-inset-bottom)); }
   .tilt-bottom button { flex: 1; font: inherit; font-size: 15px; font-weight: 650; padding: 15px 4px; border-radius: 14px; border: 0; background: rgba(255,255,255,.92); color: #111; }
   .tilt-bottom button.primary { flex: 1.5; background: var(--accent); color: #fff; }
@@ -124,8 +129,9 @@
       <ol>
         <li>Đứng ở chỗ <b>nhìn thấy hết các góc phòng</b> (thường là giữa phòng). Đứng yên một chỗ suốt lúc quét.</li>
         <li>Cầm điện thoại ngang tầm mắt, nhập độ cao từ sàn tới camera bên dưới.</li>
-        <li>Đưa dấu <b>+</b> vào từng <b>góc chân tường</b> (chỗ 2 tường gặp sàn), lần lượt theo một chiều, bấm <b>Thêm góc</b>.</li>
-        <li>Muốn đo trần: ngắm vào <b>góc trần ngay trên góc vừa thêm</b>, bấm <b>Đo trần</b>. Xong thì bấm <b>Xong</b>.</li>
+        <li>Đưa dấu <b>+</b> vào từng <b>góc chân tường</b> (chỗ 2 tường gặp sàn), lần lượt theo một chiều, bấm <b>Thêm góc</b> rồi giữ yên máy nửa giây.</li>
+        <li><b>Góc nhỏ, ở xa hoặc bị khuất</b> (cột, hốc tường): bấm <b>Đổi chỗ đứng</b>, đi lại gần, ngắm lại góc vừa đo (chấm vàng), bấm <b>Xác nhận chỗ đứng</b> rồi đo tiếp. Bấm <b>Phóng 2×</b> để ngắm chính xác hơn.</li>
+        <li>Đo trần (lúc nào cũng được): ngắm <b>mép trần trên một bức tường đã đo</b>, bấm <b>Đo trần</b>. Đo 2–3 chỗ cho chắc, ứng dụng lấy giá trị giữa. Xong thì bấm <b>Xong</b>.</li>
       </ol>
       <label class="f">Độ cao camera so với sàn (m) <input id="inCamH" type="number" step="0.05" min="0.5" max="2.5" value="1.45"></label>
       <button class="btn primary" id="tiltStart">Bắt đầu ngắm</button>
@@ -191,7 +197,11 @@
   <div class="cross"></div>
   <div class="tilt-top">
     <div id="tiltInfo">Đang mở camera…</div>
-    <canvas id="tiltMap" width="240" height="240"></canvas>
+    <div class="tilt-side">
+      <canvas id="tiltMap" width="240" height="240"></canvas>
+      <button id="tiltZoom">Phóng 2×</button>
+      <button id="tiltMove">Đổi chỗ đứng</button>
+    </div>
   </div>
   <div class="tilt-bottom">
     <button id="tiltUndo">Hoàn tác</button>
