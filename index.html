@@ -56,6 +56,7 @@
   #tiltInfo { flex: 1; padding: 10px 12px; border-radius: 12px; background: rgba(0,0,0,.62); color: #fff; font-size: 15px; }
   #tiltInfo b { font-size: 20px; }
   #tilt video { transform-origin: 50% 50%; }
+  #tiltAR { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
   .tilt-side { display: flex; flex-direction: column; gap: 8px; width: 120px; }
   #tiltMap { width: 120px; height: 120px; border-radius: 12px; background: rgba(0,0,0,.62); }
   .tilt-side button { font: inherit; font-size: 13px; font-weight: 650; padding: 10px 4px; border-radius: 10px; border: 0; background: rgba(255,255,255,.88); color: #111; }
@@ -131,7 +132,8 @@
         <li>Cầm điện thoại ngang tầm mắt, nhập độ cao từ sàn tới camera bên dưới.</li>
         <li>Đưa dấu <b>+</b> vào từng <b>góc chân tường</b> (chỗ 2 tường gặp sàn), lần lượt theo một chiều, bấm <b>Thêm góc</b> rồi giữ yên máy nửa giây.</li>
         <li><b>Góc nhỏ, ở xa hoặc bị khuất</b> (cột, hốc tường): bấm <b>Đổi chỗ đứng</b>, đi lại gần, ngắm lại góc vừa đo (chấm vàng), bấm <b>Xác nhận chỗ đứng</b> rồi đo tiếp. Bấm <b>Phóng 2×</b> để ngắm chính xác hơn.</li>
-        <li>Đo trần (lúc nào cũng được): ngắm <b>mép trần trên một bức tường đã đo</b>, bấm <b>Đo trần</b>. Đo 2–3 chỗ cho chắc, ứng dụng lấy giá trị giữa. Xong thì bấm <b>Xong</b>.</li>
+        <li>Đo trần, 2 bước: <b>chúc xuống chân tường</b> chỗ muốn đo, bấm <b>Đặt mốc trần</b> (hiện vạch cam MỐC); rồi <b>ngẩng theo vạch cam</b> lên mép trần, bấm <b>Đo trần</b>. Đo 2–3 chỗ, ứng dụng lấy giá trị giữa. Xong thì bấm <b>Xong</b>.</li>
+        <li>Tường xiên, góc không vuông: cứ ngắm đúng chân góc như bình thường. Mặt bằng sẽ ghi số độ ở các góc không vuông.</li>
       </ol>
       <label class="f">Độ cao camera so với sàn (m) <input id="inCamH" type="number" step="0.05" min="0.5" max="2.5" value="1.45"></label>
       <button class="btn primary" id="tiltStart">Bắt đầu ngắm</button>
@@ -194,6 +196,7 @@
 
 <div id="tilt">
   <video id="tiltVideo" playsinline muted autoplay></video>
+  <canvas id="tiltAR"></canvas>
   <div class="cross"></div>
   <div class="tilt-top">
     <div id="tiltInfo">Đang mở camera…</div>

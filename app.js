@@ -34,14 +34,37 @@ function outNormal(p, i, sign) {
   const a = p[i], b = p[(i + 1) % p.length], d = dist(a, b) || 1;
   return { x: sign * (b.y - a.y) / d, y: -sign * (b.x - a.x) / d };
 }
-// Đẩy đa giác ra ngoài một khoảng d (nối góc kiểu miter) -> mép ngoài tường
+// Đẩy đa giác ra ngoài một khoảng d -> mép ngoài tường.
+// Góc vuông/tù: nối thẳng (miter). Góc nhọn lồi (< 70°): vát góc, tránh mũi nhọn chĩa ra ngoài.
 function offsetPolygon(p, d) {
-  const n = p.length, sign = signedArea(p) >= 0 ? 1 : -1;
-  return p.map((v, i) => {
+  const n = p.length, sign = signedArea(p) >= 0 ? 1 : -1, out = [];
+  for (let i = 0; i < n; i++) {
+    const v = p[i], a = p[(i - 1 + n) % n], b = p[(i + 1) % n];
     const n1 = outNormal(p, (i - 1 + n) % n, sign), n2 = outNormal(p, i, sign);
-    const k = Math.max(0.15, 1 + n1.x * n2.x + n1.y * n2.y);
-    return { x: v.x + d * (n1.x + n2.x) / k, y: v.y + d * (n1.y + n2.y) / k };
-  });
+    const convex = ((v.x - a.x) * (b.y - v.y) - (v.y - a.y) * (b.x - v.x)) * sign > 0;
+    const c = n1.x * n2.x + n1.y * n2.y; // = −cos(góc trong)
+    if (convex && c < -0.34) {
+      out.push({ x: v.x + d * n1.x, y: v.y + d * n1.y }, { x: v.x + d * n2.x, y: v.y + d * n2.y });
+    } else {
+      const k = Math.max(0.05, 1 + c);
+      out.push({ x: v.x + d * (n1.x + n2.x) / k, y: v.y + d * (n1.y + n2.y) / k });
+    }
+  }
+  return out;
+}
+// Góc trong (độ) tại đỉnh i của đa giác kín
+function cornerAngle(p, i) {
+  const n = p.length, v = p[i], a = p[(i - 1 + n) % n], b = p[(i + 1) % n];
+  const u1 = { x: a.x - v.x, y: a.y - v.y }, u2 = { x: b.x - v.x, y: b.y - v.y };
+  const l1 = Math.hypot(u1.x, u1.y) || 1, l2 = Math.hypot(u2.x, u2.y) || 1;
+  let ang = Math.acos(Math.max(-1, Math.min(1, (u1.x * u2.x + u1.y * u2.y) / (l1 * l2)))) * 180 / Math.PI;
+  const convex = ((v.x - a.x) * (b.y - v.y) - (v.y - a.y) * (b.x - v.x)) * (signedArea(p) >= 0 ? 1 : -1) > 0;
+  if (!convex) ang = 360 - ang;
+  // hướng phân giác vào trong phòng
+  let bx = u1.x / l1 + u2.x / l2, by = u1.y / l1 + u2.y / l2, bl = Math.hypot(bx, by);
+  if (bl < 1e-6) { bx = -u1.y / l1; by = u1.x / l1; bl = 1; }
+  const s = convex ? 1 : -1;
+  return { ang, bis: { x: s * bx / bl, y: s * by / bl } };
 }
 function bounds(p) {
   const xs = p.map((v) => v.x), ys = p.map((v) => v.y);
@@ -79,8 +102,9 @@ function orthogonalize() {
   const find = (g, i) => (g[i] === i ? i : (g[i] = find(g, g[i])));
   for (let i = 0; i < edgeCount(); i++) {
     const j = (i + 1) % n, ang = Math.abs(Math.atan2(p[j].y - p[i].y, p[j].x - p[i].x) * 180 / Math.PI);
-    if (ang < 20 || ang > 160) gy[find(gy, i)] = find(gy, j);        // cạnh ngang: chung y
-    else if (Math.abs(ang - 90) < 20) gx[find(gx, i)] = find(gx, j); // cạnh dọc: chung x
+    // chỉ nắn cạnh lệch dưới 10° (sai số đo); tường xiên thật được giữ nguyên
+    if (ang < 10 || ang > 170) gy[find(gy, i)] = find(gy, j);        // cạnh ngang: chung y
+    else if (Math.abs(ang - 90) < 10) gx[find(gx, i)] = find(gx, j); // cạnh dọc: chung x
   }
   for (const [g, key] of [[gx, 'x'], [gy, 'y']]) {
     const sum = {}, cnt = {};
@@ -149,6 +173,11 @@ function renderPlan() {
   if (room.closed && n >= 3) {
     const c = centroid(p);
     s += label(c.x, c.y, Math.abs(signedArea(p)).toFixed(2) + ' m²', 0, fs * 1.5, '#8a5a1c');
+    for (let i = 0; i < n; i++) { // ghi số độ ở các góc không vuông
+      const { ang, bis } = cornerAngle(p, i);
+      if (Math.abs(ang - 90) < 0.5 || Math.abs(ang - 270) < 0.5) continue;
+      s += label(p[i].x + bis.x * fs * 2.2, p[i].y + bis.y * fs * 2.2, ang.toFixed(0) + '°', 0, fs * 0.85, '#b42318');
+    }
   }
   p.forEach((v, i) => {
     const first = i === 0 && !room.closed && n >= 3;
@@ -269,7 +298,7 @@ function toDXF() { // đơn vị mm, trục Y hướng lên
     const tx = (a.x + b.x) / 2 + nrm.x * k, ty = (a.y + b.y) / 2 + nrm.y * k;
     o += `0\nTEXT\n8\nKICH_THUOC\n10\n${mm(tx)}\n20\n${mm(-ty)}\n40\n120\n1\n${t}\n50\n${ang.toFixed(2)}\n72\n1\n11\n${mm(tx)}\n21\n${mm(-ty)}\n`;
   }
-  if (room.closed && n >= 3) { const out = offsetPolygon(p, room.thick); out.forEach((a, i) => line(a, out[(i + 1) % n], 'TUONG_NGOAI')); }
+  if (room.closed && n >= 3) { const out = offsetPolygon(p, room.thick); out.forEach((a, i) => line(a, out[(i + 1) % out.length], 'TUONG_NGOAI')); }
   return o + '0\nENDSEC\n0\nEOF\n';
 }
 $('#xDXF').onclick = () => download('mat-bang.dxf', toDXF(), 'application/dxf');
@@ -479,15 +508,20 @@ else {
 }
 
 let tilt = null;
-// Hướng trục camera sau trong hệ trái đất (x đông, y bắc, z lên), từ góc Euler alpha-beta-gamma của W3C
-function camDir(e) {
+// Ma trận quay thiết bị -> trái đất (x đông, y bắc, z lên), từ góc Euler alpha-beta-gamma của W3C
+function rotMatrix(e) {
   const a = e.alpha * DEG, b = e.beta * DEG, g = (e.gamma || 0) * DEG;
   const cA = Math.cos(a), sA = Math.sin(a), cB = Math.cos(b), sB = Math.sin(b), cG = Math.cos(g), sG = Math.sin(g);
-  return [-(cA * sG + cG * sA * sB), -(sA * sG - cA * cG * sB), -(cB * cG)];
+  return [
+    cA * cG - sA * sB * sG, -cB * sA, cA * sG + cG * sA * sB,
+    cG * sA + cA * sB * sG, cA * cB, sA * sG - cA * cG * sB,
+    -cB * sG, sB, cB * cG,
+  ];
 }
 function onOrient(e) {
   if (!tilt || e.alpha == null || e.beta == null) return;
-  const d = camDir(e);
+  const R = rotMatrix(e), d = [-R[2], -R[5], -R[8]]; // camera sau nhìn theo trục −z của máy
+  tilt.R = R;
   if (tilt.capture) tilt.capture.push(d);
   if (!tilt.sm) tilt.sm = d.slice(); else for (let i = 0; i < 3; i++) tilt.sm[i] = tilt.sm[i] * 0.75 + d[i] * 0.25; // làm mượt
 }
@@ -504,29 +538,32 @@ function readingFrom(v) {
   return { elev, dir, floor };
 }
 const median = (a) => { const s = [...a].sort((p, q) => p - q), m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
-// Khoảng cách ngang từ chỗ đứng tới bức tường (đã đo) theo hướng đang nhìn
-function wallDistance(r) {
-  const p = tilt.pts, n = p.length, st = tilt.station;
-  let best = null;
+const ceilH = () => (tilt.ceils.length ? median(tilt.ceils) : null);
+
+// Mốc để đo trần theo hướng đang nhìn: ưu tiên mốc người dùng đặt, sau đó tới bức tường đã đo.
+// Trả về { d: khoảng cách ngang, foot: chân mốc trên sàn, src } hoặc lỗi.
+function ceilTarget(r) {
+  const st = tilt.station;
+  if (tilt.mark) {
+    const vx = tilt.mark.x - st.x, vy = tilt.mark.y - st.y, L = Math.hypot(vx, vy);
+    const off = Math.acos(Math.max(-1, Math.min(1, (vx * r.dir.x + vy * r.dir.y) / (L || 1)))) / DEG;
+    if (off > 12) return { err: 'off', off };
+    return { d: L * Math.cos(off * DEG), foot: tilt.mark, src: 'mark' };
+  }
+  const p = tilt.pts, n = p.length;
+  let best = null, wall = -1;
   for (let i = 0; i < (n >= 3 ? n : n - 1); i++) {
     const a = p[i], b = p[(i + 1) % n], ex = b.x - a.x, ey = b.y - a.y;
     const den = r.dir.x * ey - r.dir.y * ex;
     if (Math.abs(den) < 1e-9) continue;
     const wx = a.x - st.x, wy = a.y - st.y;
     const t = (wx * ey - wy * ex) / den, u = (wx * r.dir.y - wy * r.dir.x) / den;
-    if (t > 0.2 && u > -0.05 && u < 1.05 && (best == null || t < best)) best = t;
+    if (t > 0.2 && u > -0.05 && u < 1.05 && (best == null || t < best)) { best = t; wall = i; }
   }
-  if (best == null) { // chưa có tường theo hướng này: dùng góc đã đo gần hướng nhìn nhất (lệch < 15°)
-    let bd = 15 * DEG;
-    for (const q of p) {
-      const vx = q.x - st.x, vy = q.y - st.y, L = Math.hypot(vx, vy);
-      if (L < 0.2) continue;
-      const ang = Math.acos(Math.max(-1, Math.min(1, (vx * r.dir.x + vy * r.dir.y) / L)));
-      if (ang < bd) { bd = ang; best = L; }
-    }
-  }
-  return best;
+  if (best == null) return { err: 'none' };
+  return { d: best, foot: { x: st.x + r.dir.x * best, y: st.y + r.dir.y * best }, src: 'wall', wall };
 }
+
 // Lấy trung bình hướng nhìn trong 0,45 s để số đo không bị rung tay
 function steady(cb) {
   if (!tilt?.sm || tilt.capture) return;
@@ -537,27 +574,103 @@ function steady(cb) {
     let v = tilt.sm.slice();
     if (c.length >= 3) { v = [0, 0, 0]; c.forEach((d) => { for (let i = 0; i < 3; i++) v[i] += d[i]; }); }
     cb(readingFrom(v));
-    navigator.vibrate?.(30);
+    try { navigator.vibrate?.(30); } catch { /* bỏ qua */ }
   }, 450);
 }
-function drawTiltMap(cur) {
+
+// ---- Vẽ chồng lên hình camera: chân tường, mốc, đường trần (chiếu từ góc nghiêng của máy) ----
+const FOV_LONG = 67 * DEG; // góc nhìn theo cạnh dài của camera chính điện thoại (xấp xỉ)
+function drawOverlay(r, tgt) {
+  const cv = $('#tiltAR'), video = $('#tiltVideo'), dpr = devicePixelRatio || 1;
+  const W = cv.clientWidth, H = cv.clientHeight;
+  if (cv.width !== Math.round(W * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
+  const g = cv.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  const vw = video.videoWidth, vh = video.videoHeight, R = tilt.R;
+  if (!vw || !vh || !R) return;
+  const f = (Math.max(vw, vh) / 2) / Math.tan(FOV_LONG / 2) * Math.max(W / vw, H / vh) * (tilt.zoom ? 2 : 1);
+  const ang = ((screen.orientation?.angle ?? window.orientation ?? 0) * DEG);
+  const ca = Math.cos(ang), sa = Math.sin(ang), st = tilt.station, h = tilt.h;
+  // điểm mặt bằng (x, y) ở độ cao z -> toạ độ máy
+  const dev = (x, y, z) => {
+    const vx = x - st.x, vy = -(y - st.y), vz = z - h;
+    return [R[0] * vx + R[3] * vy + R[6] * vz, R[1] * vx + R[4] * vy + R[7] * vz, R[2] * vx + R[5] * vy + R[8] * vz];
+  };
+  const scr = (q) => {
+    const depth = -q[2], u = f * q[0] / depth, v = f * q[1] / depth;
+    return [W / 2 + (u * ca - v * sa), H / 2 - (u * sa + v * ca)];
+  };
+  const NEAR = 0.15;
+  const seg = (A, B) => { // cắt bỏ phần nằm sau lưng camera
+    let a = dev(...A), b = dev(...B);
+    const da = -a[2], db = -b[2];
+    if (da < NEAR && db < NEAR) return null;
+    if (da < NEAR) { const t = (NEAR - da) / (db - da); a = a.map((x, i) => x + (b[i] - x) * t); }
+    if (db < NEAR) { const t = (NEAR - db) / (da - db); b = b.map((x, i) => x + (a[i] - x) * t); }
+    return [scr(a), scr(b)];
+  };
+  const line = (A, B, color, w, dash) => {
+    const s = seg(A, B); if (!s) return;
+    g.setLineDash(dash || []); g.lineCap = 'round';
+    g.strokeStyle = 'rgba(0,0,0,.55)'; g.lineWidth = w + 3; g.beginPath(); g.moveTo(...s[0]); g.lineTo(...s[1]); g.stroke();
+    g.strokeStyle = color; g.lineWidth = w; g.beginPath(); g.moveTo(...s[0]); g.lineTo(...s[1]); g.stroke();
+    g.setLineDash([]);
+  };
+  const dot = (P, color, rad, text) => {
+    const q = dev(...P); if (-q[2] < NEAR) return;
+    const [x, y] = scr(q);
+    g.fillStyle = color; g.strokeStyle = '#000'; g.lineWidth = 2;
+    g.beginPath(); g.arc(x, y, rad, 0, 7); g.fill(); g.stroke();
+    if (text) {
+      g.font = '700 14px system-ui, sans-serif'; g.textAlign = 'left'; g.textBaseline = 'middle';
+      g.lineWidth = 4; g.strokeStyle = 'rgba(0,0,0,.75)'; g.strokeText(text, x + rad + 5, y); g.fillStyle = '#fff'; g.fillText(text, x + rad + 5, y);
+    }
+  };
+  const p = tilt.pts, n = p.length, CH = ceilH();
+  const m = n >= 3 ? n : n - 1;
+  for (let i = 0; i < m; i++) {
+    const a = p[i], b = p[(i + 1) % n], hi = tgt && tgt.src === 'wall' && tgt.wall === i;
+    line([a.x, a.y, 0], [b.x, b.y, 0], hi ? '#ffcc00' : '#fff', hi ? 4 : 3);
+    if (CH) line([a.x, a.y, CH], [b.x, b.y, CH], 'rgba(255,255,255,.8)', 2, [8, 6]);
+  }
+  p.forEach((v, i) => {
+    if (CH) line([v.x, v.y, 0], [v.x, v.y, CH], 'rgba(255,255,255,.6)', 2, [4, 6]);
+    dot([v.x, v.y, 0], i === n - 1 && tilt.relocate ? '#ffcc00' : i ? '#e8792b' : '#2e9e5b', i === n - 1 && tilt.relocate ? 10 : 7, String(i + 1));
+  });
+  // mốc đo trần: vạch đứng màu cam từ chân tường lên
+  if (tilt.mark) {
+    const k = tilt.mark;
+    line([k.x, k.y, 0], [k.x, k.y, Math.max(3.5, (CH || 0) + 0.5)], '#ff7a1a', 4);
+    dot([k.x, k.y, 0], '#ff7a1a', 9, 'MỐC');
+  }
+  // khi đang ngẩng lên: vạch vàng từ chân mốc tới chỗ đang ngắm
+  if (tgt && tgt.foot && r.elev > 0) {
+    const Hn = h + tgt.d * Math.tan(r.elev);
+    line([tgt.foot.x, tgt.foot.y, 0], [tgt.foot.x, tgt.foot.y, Hn], '#ffcc00', 3);
+  }
+  // khi đang chúc xuống: điểm sẽ được thêm
+  if (r.floor && !tilt.capture) dot([r.floor.x, r.floor.y, 0], '#ffcc00', 5);
+}
+
+function drawTiltMap(cur, tgt) {
   const cv = $('#tiltMap'), g = cv.getContext('2d'), W = cv.width, { pts, stations, station } = tilt;
   g.clearRect(0, 0, W, W);
-  const all = [...pts, ...stations, ...(cur ? [cur] : [])];
+  const all = [...pts, ...stations, ...(cur ? [cur] : []), ...(tilt.mark ? [tilt.mark] : [])];
   const b = bounds(all), s = Math.max(2, b.w, b.h) * 1.15, k = (W - 24) / s;
   const P = (v) => [W / 2 + (v.x - b.cx) * k, W / 2 + (v.y - b.cy) * k];
-  if (pts.length) {
-    g.strokeStyle = '#fff'; g.lineWidth = 3; g.beginPath();
-    pts.forEach((v, i) => { const [px, py] = P(v); i ? g.lineTo(px, py) : g.moveTo(px, py); });
-    if (pts.length >= 3) g.closePath();
-    g.stroke();
+  const n = pts.length;
+  for (let i = 0; i < (n >= 3 ? n : n - 1); i++) {
+    const hi = tgt && tgt.src === 'wall' && tgt.wall === i;
+    g.strokeStyle = hi ? '#ffcc00' : '#fff'; g.lineWidth = hi ? 6 : 3;
+    g.beginPath(); g.moveTo(...P(pts[i])); g.lineTo(...P(pts[(i + 1) % n])); g.stroke();
   }
   if (cur) { g.strokeStyle = '#ffcc00'; g.lineWidth = 2; g.setLineDash([6, 6]); g.beginPath(); g.moveTo(...P(station)); g.lineTo(...P(cur)); g.stroke(); g.setLineDash([]); }
   pts.forEach((v, i) => {
-    const last = i === pts.length - 1 && tilt.relocate;
+    const last = i === n - 1 && tilt.relocate;
     g.fillStyle = last ? '#ffcc00' : i ? '#e8792b' : '#2e9e5b';
     g.beginPath(); g.arc(...P(v), last ? 11 : 7, 0, 7); g.fill();
   });
+  if (tilt.mark) { g.fillStyle = '#ff7a1a'; g.strokeStyle = '#fff'; g.lineWidth = 2; g.beginPath(); g.arc(...P(tilt.mark), 9, 0, 7); g.fill(); g.stroke(); }
   stations.forEach((v) => { g.fillStyle = v === station ? '#4da3ff' : 'rgba(77,163,255,.45)'; g.beginPath(); g.arc(...P(v), v === station ? 9 : 6, 0, 7); g.fill(); });
 }
 function updateTiltButtons() {
@@ -568,30 +681,35 @@ function updateTiltButtons() {
 function tiltLoop() {
   if (!tilt) return;
   requestAnimationFrame(tiltLoop);
-  const info = $('#tiltInfo'), n = tilt.pts.length;
+  const info = $('#tiltInfo'), n = tilt.pts.length, ceilBtn = $('#tiltCeil');
   if (!tilt.sm) {
     info.textContent = performance.now() - tilt.t0 > 2500 ? 'Không nhận được cảm biến nghiêng. Hãy cho phép “Chuyển động & hướng” rồi thử lại.' : 'Đang chờ cảm biến…';
     return;
   }
-  const r = readingFrom(tilt.sm);
-  const ceilTxt = tilt.ceils.length ? ` · trần ${median(tilt.ceils).toFixed(2)} m (${tilt.ceils.length} lần)` : '';
+  const r = readingFrom(tilt.sm), up = r.elev > 4 * DEG;
+  const tgt = up ? ceilTarget(r) : null;
+  ceilBtn.textContent = up ? 'Đo trần' : tilt.mark ? 'Đặt lại mốc' : 'Đặt mốc trần';
+  const CH = ceilH(), ceilTxt = CH ? ` · trần ${CH.toFixed(2)} m (${tilt.ceils.length} lần)` : '';
   if (tilt.capture) info.innerHTML = '<b>Giữ yên máy…</b>';
   else if (tilt.relocate) {
     info.innerHTML = 'Đã đổi chỗ. Ngắm lại <b>góc cuối cùng</b> (chấm vàng) rồi bấm <b>Xác nhận chỗ đứng</b>'
       + (r.floor ? `<br>cách ${r.floor.d.toFixed(2)} m` : '');
+  } else if (up) {
+    const a = `Ngẩng ${(r.elev / DEG).toFixed(0)}°`;
+    if (tgt.err === 'off') info.innerHTML = `${a} · lệch mốc ${tgt.off.toFixed(0)}°<br>Xoay về <b>vạch cam MỐC</b> rồi ngẩng thẳng lên mép trần`;
+    else if (tgt.err) info.innerHTML = `${a} · chưa có mốc<br>Chúc xuống <b>chân tường</b> ngay dưới mép trần, bấm <b>Đặt mốc trần</b>${ceilTxt}`;
+    else info.innerHTML = `${a} · ${tgt.src === 'mark' ? 'mốc' : 'tường'} cách ${tgt.d.toFixed(2)} m<br>trần <b>${(tilt.h + tgt.d * Math.tan(r.elev)).toFixed(2)} m</b> → đưa dấu + lên mép trần, bấm <b>Đo trần</b>${ceilTxt}`;
   } else if (r.floor) {
     let t = `Chúc ${(-r.elev / DEG).toFixed(0)}° · cách <b>${r.floor.d.toFixed(2)} m</b>`;
     if (n) t += ` · cạnh ${dist(tilt.pts[n - 1], r.floor).toFixed(2)} m`;
-    info.innerHTML = t + `<br>${n} góc${ceilTxt}`;
-  } else if (r.elev > 4 * DEG && n) {
-    const d = wallDistance(r);
-    info.innerHTML = d == null
-      ? `Ngẩng ${(r.elev / DEG).toFixed(0)}° · hãy ngắm <b>mép trần</b> trên một bức tường đã đo${ceilTxt}`
-      : `Ngẩng ${(r.elev / DEG).toFixed(0)}° · tường cách ${d.toFixed(2)} m<br>trần <b>${(tilt.h + d * Math.tan(r.elev)).toFixed(2)} m</b> → bấm Đo trần${ceilTxt}`;
+    if (tilt.mark) t += '<br>Đã có MỐC: ngẩng theo vạch cam lên mép trần';
+    else t += `<br>${n} góc${ceilTxt}`;
+    info.innerHTML = t;
   } else {
     info.innerHTML = `Chúc camera xuống, ngắm dấu + vào góc chân tường<br>${n} góc${ceilTxt}`;
   }
-  drawTiltMap(r.floor);
+  drawOverlay(r, tgt && !tgt.err ? tgt : null);
+  drawTiltMap(r.floor, tgt && !tgt.err ? tgt : null);
 }
 async function startTilt() {
   const h = parseFloat(String(inCamH.value).replace(',', '.'));
@@ -610,7 +728,7 @@ async function startTilt() {
   const video = $('#tiltVideo'); video.srcObject = cam.value; video.style.transform = '';
   video.play().catch(() => { /* đã autoplay */ });
   const station = { x: 0, y: 0 };
-  tilt = { h, stream: cam.value, pts: [], ceils: [], hist: [], station, stations: [station], relocate: false, capture: null, zoom: false, sm: null, t0: performance.now() };
+  tilt = { h, stream: cam.value, pts: [], ceils: [], hist: [], station, stations: [station], mark: null, relocate: false, capture: null, zoom: false, sm: null, R: null, t0: performance.now() };
   addEventListener('deviceorientation', onOrient);
   $('#tilt').classList.add('on'); $('#tiltZoom').classList.remove('on');
   updateTiltButtons();
@@ -622,13 +740,14 @@ function stopTilt(keep) {
   t.stream.getTracks().forEach((x) => x.stop());
   $('#tiltVideo').srcObject = null;
   $('#tilt').classList.remove('on');
-  if (!keep || t.pts.length < 2) return;
+  if (!keep) return;
+  if (t.ceils.length) { room.height = Math.round(median(t.ceils) * 100) / 100; inH.value = room.height; }
+  if (t.pts.length < 2) { if (t.ceils.length) commit(); return; }
   room.points = t.pts.map((v) => ({ x: v.x, y: v.y }));
   room.closed = t.pts.length >= 3;
   alignLongest();
   const x0 = Math.min(...room.points.map((v) => v.x)), y0 = Math.min(...room.points.map((v) => v.y));
   room.points.forEach((v) => { v.x = Math.round((v.x - x0) * 100) / 100; v.y = Math.round((v.y - y0) * 100) / 100; });
-  if (t.ceils.length) { room.height = Math.round(median(t.ceils) * 100) / 100; inH.value = room.height; }
   show('plan'); fit(); commit();
 }
 $('#tiltStart').onclick = () => { if (tiltOK && isSecureContext) startTilt(); else alert(tiltStatus.textContent); };
@@ -638,22 +757,30 @@ $('#tiltAdd').onclick = () => steady((r) => {
     const ref = tilt.pts[tilt.pts.length - 1], prev = tilt.station;
     tilt.station = { x: ref.x - (r.floor.x - prev.x), y: ref.y - (r.floor.y - prev.y) };
     tilt.stations.push(tilt.station);
-    tilt.hist.push({ type: 'st', prev });
+    tilt.hist.push({ type: 'st', prev, mark: tilt.mark });
+    tilt.mark = null; // mốc cũ đo từ chỗ đứng cũ
     tilt.relocate = false; updateTiltButtons();
   } else {
     tilt.pts.push({ x: r.floor.x, y: r.floor.y });
     tilt.hist.push({ type: 'pt' });
   }
 });
+// Đo trần 2 bước: (1) chúc xuống chân tường -> đặt MỐC; (2) ngẩng theo vạch cam lên mép trần -> Đo trần
 $('#tiltCeil').onclick = () => {
   if (!tilt?.sm) return;
-  if (!tilt.pts.length) { alert('Đo ít nhất hai góc chân tường trước, rồi ngắm mép trần trên bức tường giữa hai góc đó.'); return; }
   steady((r) => {
-    if (r.elev < 4 * DEG) { alert('Hãy ngẩng camera lên mép trần (chỗ tường gặp trần) trên một bức tường đã đo.'); return; }
-    const d = wallDistance(r);
-    if (d == null) { alert('Hướng này chưa có bức tường nào đã đo. Hãy ngắm mép trần phía trên đoạn tường nằm giữa hai góc đã thêm.'); return; }
-    tilt.ceils.push(tilt.h + d * Math.tan(r.elev));
-    tilt.hist.push({ type: 'ceil' });
+    if (r.floor) { // bước 1
+      tilt.hist.push({ type: 'mark', prev: tilt.mark });
+      tilt.mark = { x: r.floor.x, y: r.floor.y };
+      return;
+    }
+    if (r.elev < 4 * DEG) { alert('Chúc xuống chân tường để đặt mốc, hoặc ngẩng lên mép trần để đo.'); return; }
+    const t = ceilTarget(r);
+    if (t.err === 'off') { alert(`Đang lệch mốc ${t.off.toFixed(0)}°. Xoay về vạch cam MỐC rồi ngẩng thẳng lên mép trần.`); return; }
+    if (t.err) { alert('Chưa có mốc. Chúc xuống chân tường ngay dưới chỗ định đo, bấm “Đặt mốc trần”, rồi ngẩng lên mép trần.'); return; }
+    tilt.ceils.push(tilt.h + t.d * Math.tan(r.elev));
+    tilt.hist.push({ type: 'ceil', mark: tilt.mark });
+    tilt.mark = null;
   });
 };
 $('#tiltMove').onclick = () => {
@@ -672,8 +799,9 @@ $('#tiltUndo').onclick = () => {
   if (tilt.relocate) { tilt.relocate = false; updateTiltButtons(); return; }
   const h = tilt.hist.pop(); if (!h) return;
   if (h.type === 'pt') tilt.pts.pop();
-  else if (h.type === 'ceil') tilt.ceils.pop();
-  else { tilt.stations.pop(); tilt.station = h.prev; }
+  else if (h.type === 'ceil') { tilt.ceils.pop(); tilt.mark = h.mark; }
+  else if (h.type === 'mark') tilt.mark = h.prev;
+  else { tilt.stations.pop(); tilt.station = h.prev; tilt.mark = h.mark; }
 };
 $('#tiltDone').onclick = () => stopTilt(true);
 
