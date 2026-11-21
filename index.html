@@ -92,6 +92,26 @@
   .bar3d { position: absolute; left: 10px; top: 10px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: rgba(255,255,255,.9); padding: 8px 10px; border-radius: 10px; }
   #empty3d { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; color: var(--muted); pointer-events: none; }
 
+  /* Đo trên ảnh */
+  #p-photo { flex-direction: column; background: #1b2430; }
+  .ptools { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; padding: 8px 10px; background: var(--card); border-bottom: 1px solid var(--line); }
+  .ptools select { font: inherit; padding: 7px 6px; border-radius: 8px; border: 1px solid var(--line); background: #fff; }
+  label.file { position: relative; overflow: hidden; display: inline-block; padding: 8px 12px; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 650; cursor: pointer; }
+  label.file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .seg { display: flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { font: inherit; border: 0; background: #fff; padding: 8px 10px; cursor: pointer; border-right: 1px solid var(--line); }
+  .seg button:last-child { border-right: 0; }
+  .seg button.on { background: var(--navy); color: #fff; }
+  .pc-wrap { flex: 1; min-height: 0; position: relative; }
+  #pc { width: 100%; height: 100%; display: block; touch-action: none; cursor: crosshair; }
+  #loupe { position: absolute; top: 10px; left: 10px; width: 130px; height: 130px; border-radius: 50%; border: 3px solid #fff; box-shadow: 0 2px 10px rgba(0,0,0,.5); display: none; pointer-events: none; }
+  .pc-empty { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; gap: 8px; padding: 24px; max-width: 560px; margin: 0 auto; color: #d5dbe3; pointer-events: none; }
+  .pc-empty b { color: #fff; }
+  .phint { padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); background: var(--card); border-top: 1px solid var(--line); font-size: 13px; color: var(--ink); min-height: 20px; }
+  @media (max-width: 760px) {
+    .ptools .btn, .seg button { padding: 7px 8px; font-size: 14px; }
+  }
+
   /* AR overlay */
   .ar-canvas { position: fixed; inset: 0; z-index: 50; }
   .ar-overlay { display: none; position: fixed; inset: 0; z-index: 60; flex-direction: column; justify-content: space-between; pointer-events: none; }
@@ -106,7 +126,8 @@
     aside { width: auto; border-left: 0; border-top: 1px solid var(--line); max-height: 44%; }
     header h1 { font-size: 15px; }
     nav { margin-left: 0; width: 100%; }
-    nav button { flex: 1; }
+    nav button { flex: 1; padding: 8px 4px; white-space: nowrap; }
+    nav .n { display: none; }
   }
 </style>
 </head>
@@ -114,9 +135,10 @@
 <header>
   <h1>Quét Phòng</h1>
   <nav>
-    <button data-tab="scan">1 · Quét</button>
-    <button data-tab="plan" class="on">2 · Mặt bằng</button>
-    <button data-tab="3d">3 · Khối 3D</button>
+    <button data-tab="scan"><span class="n">1 · </span>Quét</button>
+    <button data-tab="plan" class="on"><span class="n">2 · </span>Mặt bằng</button>
+    <button data-tab="3d"><span class="n">3 · Khối </span>3D</button>
+    <button data-tab="photo"><span class="n">4 · </span>Đo ảnh</button>
   </nav>
 </header>
 
@@ -192,6 +214,36 @@
     </div>
     <div id="empty3d">Chưa có mặt bằng. Hãy quét hoặc vẽ ở bước 2.</div>
   </section>
+
+  <section class="panel" id="p-photo">
+    <div class="ptools">
+      <label class="btn primary file">Chọn ảnh<input type="file" id="pFile" accept="image/*"></label>
+      <div class="seg">
+        <button data-tool="ref">Mốc thước</button>
+        <button data-tool="plane">Mặt phẳng 4 điểm</button>
+        <button data-tool="dim" class="on">Đặt dim</button>
+      </div>
+      <select id="pUnit" title="Đơn vị">
+        <option value="mm">mm</option><option value="cm">cm</option><option value="m">m</option>
+      </select>
+      <button class="btn" id="pUndo">Hoàn tác</button>
+      <button class="btn" id="pDel">Xóa dim chọn</button>
+      <button class="btn" id="pFit" title="Vừa khung">⤢</button>
+      <button class="btn primary" id="pSave">Lưu ảnh</button>
+    </div>
+    <div class="pc-wrap" id="pcWrap">
+      <canvas id="pc"></canvas>
+      <canvas id="loupe" width="260" height="260"></canvas>
+      <div class="pc-empty" id="pcEmpty">
+        <div><b>Đo kích thước trên ảnh</b></div>
+        <div>1. Bấm <b>Chọn ảnh</b> (chụp mới hoặc lấy từ thư viện).</div>
+        <div>2. Đặt mốc: <b>Mốc thước</b> (chạm 2 đầu vật biết kích thước) hoặc <b>Mặt phẳng 4 điểm</b> (4 góc một hình chữ nhật biết kích thước, dùng khi chụp xiên).</div>
+        <div>3. <b>Đặt dim</b>: chạm 2 điểm. Kéo chấm trắng để chỉnh, hai ngón để phóng to.</div>
+        <div>4. Bấm <b>Lưu ảnh</b> để tải ảnh đã ghi kích thước.</div>
+      </div>
+    </div>
+    <div class="phint" id="pHint"></div>
+  </section>
 </main>
 
 <div id="tilt">
@@ -224,5 +276,6 @@
 </div>
 
 <script type="module" src="app.js"></script>
+<script type="module" src="photo.js"></script>
 </body>
 </html>
